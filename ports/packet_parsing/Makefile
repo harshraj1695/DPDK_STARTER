@@ -1,6 +1,6 @@
-APP = dpdk_tun_app
+APP = packet_parsing
 
-SRCS = main.c eal_init.c mempool.c port.c rx_tx.c mk_buff_info.c
+SRCS = main.c eal_init.c mempool.c port.c rx_tx.c mk_buff_info.c packet_parsing.c
 
 CFLAGS += -O3 -I/usr/local/include -include rte_config.h -march=native
 LDFLAGS += -L/usr/local/lib/x86_64-linux-gnu \

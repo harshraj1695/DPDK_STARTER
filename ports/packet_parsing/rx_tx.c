@@ -5,6 +5,7 @@
 #define BURST_SIZE 32
 
 void print_mbuf_info(struct rte_mbuf *m); // fro mk_buff_info.c
+void parse_packet(struct rte_mbuf *m); // from packet_parsing.c
 
 void run_rx_tx_loop(uint16_t port_id)
 {
@@ -25,10 +26,10 @@ void run_rx_tx_loop(uint16_t port_id)
 
             uint8_t *data = rte_pktmbuf_mtod(m, uint8_t *);
             uint16_t len = rte_pktmbuf_data_len(m);
-
+           
+            parse_packet(m);
             printf("Packet %d: len=%u: ", i, len);
-            for (int j = 0; j < len; j++)
-                printf("%02x ", data[j]);
+           
             printf("\n");
         }
 
