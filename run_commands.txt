@@ -1,0 +1,2 @@
+// running the dpdk application with socket interface 
+sudo ./main --huge-dir=/dev/hugepages -l 0-3 --vdev=net_af_packet0,iface=eth0

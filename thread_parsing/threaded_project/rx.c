@@ -7,7 +7,7 @@ extern uint16_t port_id;
 
 int rx_loop(void *arg)
 {
-    printf("RX thread started\n");
+    printf("RX thread started on lcore %u\n", rte_lcore_id());
     rx_count = 0;
     while (!force_quit) {
 
