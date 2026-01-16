@@ -1,53 +1,7 @@
-# =========================
-# Build / Binary Outputs
-# =========================
-dpdk_tun_app       # your compiled app
-*.out
-*.exe
-*.bin
-*.elf
+# Ignore any file with no extension produced by build
+*/
+!*.c
+!*.h
 
-# Object & compilation files
-*.o
-*.a
-*.so
-*.so.*
-*.d
-*.cmd
 
-# Build directories
-build/
-out/
-output/
 
-# DPDK auto-generated config files
-rte_config.h
-rte_build_config.h
-*/rte_config.h
-*/rte_build_config.h
-
-# Logs & dumps
-*.log
-core
-core.*
-
-# Backup / editor junk
-*~
-*.tmp
-*.bak
-*.swp
-*.swo
-
-# VSCode
-.vscode/
-
-# CLion
-.idea/
-cmake-build*/
-
-# Python cache
-__pycache__/
-*.pyc
-
-# Mac OS
-.DS_Store
