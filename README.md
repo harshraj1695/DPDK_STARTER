@@ -40,7 +40,11 @@ sudo apt install libdpdk-dev build-essential pkg-config linux-headers-$(uname -r
 ### Option 2: Build From Source
 
 ```bash
+get https://fast.dpdk.org/rel/dpdk-25.11.tar.xz
+tar xJf dpdk-25.11.tar.xz
+cd dpdk-25.11
 meson setup build
+cd build
 ninja -C build
 sudo ninja -C build install
 sudo ldconfig
