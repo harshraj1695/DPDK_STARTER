@@ -18,15 +18,10 @@ chmod +x setup_veth_bridge.sh
 sudo ./setup_veth_bridge.sh
 }
 
-// project ideas for vpp nad dpdk 
-
-DPDK-based firewall
-
-VPP NAT44 load balancer
-
-DPDK/VPP packet analyzer (like tcpdump but faster)
-
-DPDK L3 route
+// commands to run with different interface
+ sudo ./your_dpdk_app --no-huge -l 0-1 --vdev=net_af_packet0,iface=eth0
+ sudo ./your_dpdk_app --no-huge -l 0-1 --vdev=net_xdp0,iface=eth0
+ sudo ./your_dpdk_app --no-huge -l 0-1 --vdev=net_tap0,iface=tap0
 
 
 
