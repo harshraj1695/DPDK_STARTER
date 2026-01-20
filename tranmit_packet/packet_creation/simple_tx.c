@@ -29,18 +29,20 @@ static void build_udp_packet(struct rte_mbuf *m) {
   ip = (struct rte_ipv4_hdr *)(eth + 1);
   udp = (struct rte_udp_hdr *)(ip + 1);
 
-  /* ---------------- ETH HEADER ---------------- */
+  // ETH HEADER 
   struct rte_ether_addr dst = {
       {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}}; // broadcast
   struct rte_ether_addr src = {
-      {0x02, 0x00, 0x00, 0x00, 0x00, 0x01}}; // fake MAC
+    {0x00, 0x15, 0x5d, 0x0e, 0x66, 0x03} // REAL eth0 MAC
+};
+
 
   rte_ether_addr_copy(&dst, &eth->dst_addr);
   rte_ether_addr_copy(&src, &eth->src_addr);
 
   eth->ether_type = rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4);
 
-  /* ---------------- IP HEADER ---------------- */
+  //  IP HEADER 
   ip->version_ihl = 0x45; // IPv4, header = 20 bytes
   ip->type_of_service = 0;
   ip->total_length = rte_cpu_to_be_16(sizeof(*ip) + sizeof(*udp) + payload_len);
@@ -55,13 +57,13 @@ static void build_udp_packet(struct rte_mbuf *m) {
   ip->hdr_checksum = 0;
   ip->hdr_checksum = rte_ipv4_cksum(ip);
 
-  /* ---------------- UDP HEADER ---------------- */
+ // UDP HEADER 
   udp->src_port = rte_cpu_to_be_16(1234);
   udp->dst_port = rte_cpu_to_be_16(5678);
   udp->dgram_len = rte_cpu_to_be_16(sizeof(*udp) + payload_len);
   udp->dgram_cksum = 0; // optional
 
-  /* ---------------- PAYLOAD ---------------- */
+  // PAYLOAD
   char *data = (char *)(udp + 1);
   memcpy(data, payload, payload_len);
 }
@@ -71,7 +73,7 @@ int main(int argc, char **argv) {
   if (ret < 0)
     rte_exit(EXIT_FAILURE, "EAL init failed\n");
 
-  /* Create a mempool */
+  // Create a mempool 
   struct rte_mempool *mp =
       rte_pktmbuf_pool_create("MBUF_POOL", MBUF_COUNT, 0, 0,
                               RTE_MBUF_DEFAULT_BUF_SIZE, rte_socket_id());
@@ -79,18 +81,24 @@ int main(int argc, char **argv) {
   if (!mp)
     rte_exit(EXIT_FAILURE, "Cannot create mempool\n");
 
-  /* Configure port 0 (AF_PACKET PMD) */
+  // Configure port 0 (AF_PACKET PMD) 
   // uint16_t port_id = 0;
+  struct rte_eth_conf port_conf = {0};
+  port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
 
-  if (rte_eth_dev_configure(port_id, 1, 1, NULL) < 0)
+  if (rte_eth_dev_configure(port_id, 1, 1, &port_conf) < 0)
     rte_exit(EXIT_FAILURE, "Port configure failed\n");
 
-  if (rte_eth_rx_queue_setup(port_id, 0, 128, rte_eth_dev_socket_id(port_id),
-                             NULL, mp) < 0)
+  struct rte_eth_rxconf rxq_conf;
+  memset(&rxq_conf, 0, sizeof(rxq_conf));
+
+  if (rte_eth_rx_queue_setup(port_id, 0, 256, 0, &rxq_conf, mp) < 0)
     rte_exit(EXIT_FAILURE, "RX queue setup failed\n");
 
-  if (rte_eth_tx_queue_setup(port_id, 0, 128, rte_eth_dev_socket_id(port_id),
-                             NULL) < 0)
+  struct rte_eth_txconf txq_conf;
+  memset(&txq_conf, 0, sizeof(txq_conf));
+
+  if (rte_eth_tx_queue_setup(port_id, 0, 256, 0, &txq_conf) < 0)
     rte_exit(EXIT_FAILURE, "TX queue setup failed\n");
 
   if (rte_eth_dev_start(port_id) < 0)
@@ -99,17 +107,17 @@ int main(int argc, char **argv) {
   rte_eth_dev_info_get(0, &info);
   printf("Driver: %s\n", info.driver_name);
 
-  /* Allocate an mbuf */
+  // Allocate an mbuf 
   struct rte_mbuf *m = rte_pktmbuf_alloc(mp);
   if (!m)
     rte_exit(EXIT_FAILURE, "mbuf alloc failed\n");
 
-  /* Build UDP packet */
+  // Build UDP packet 
   build_udp_packet(m);
 
   printf("Transmitting packet...\n");
 
-  /* Transmit it */
+  // Transmit it
   uint16_t sent = rte_eth_tx_burst(port_id, 0, &m, 1);
   if (sent == 0) {
     printf("Failed to send\n");
