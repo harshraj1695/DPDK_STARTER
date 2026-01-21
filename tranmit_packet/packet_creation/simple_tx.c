@@ -51,8 +51,8 @@ static void build_udp_packet(struct rte_mbuf *m) {
   ip->time_to_live = 64;
   ip->next_proto_id = IPPROTO_UDP;
 
-  ip->src_addr = rte_cpu_to_be_32(0x0A000001); // 10.0.0.1
-  ip->dst_addr = rte_cpu_to_be_32(0x0A000002); // 10.0.0.2
+  ip->src_addr = rte_cpu_to_be_32(0x7F000001); // 10.0.0.1
+  ip->dst_addr = rte_cpu_to_be_32(0x7F000001); // 10.0.0.2
 
   ip->hdr_checksum = 0;
   ip->hdr_checksum = rte_ipv4_cksum(ip);

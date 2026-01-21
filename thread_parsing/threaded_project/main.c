@@ -23,8 +23,22 @@ struct rte_ring *ring_parse_to_tx;
 int main(int argc, char **argv)
 {
     rte_eal_init(argc, argv);
-
+    int t=rte_eth_dev_is_valid_port(port_id);
+  if(t<0){
+        rte_exit(EXIT_FAILURE, "Invalid port id %u\n", port_id);
+  }
+  
     //  Configure Ethernet port 
+  struct rte_eth_dev_info dev_info;
+
+rte_eth_dev_info_get(port_id, &dev_info);
+
+printf("Driver name: %s\n", dev_info.driver_name);
+printf("Max RX queues: %u\n", dev_info.max_rx_queues);
+printf("Max TX queues: %u\n", dev_info.max_tx_queues);
+printf("Min RX buffer size: %u\n", dev_info.min_rx_bufsize);
+printf("Max RX packet length: %u\n", dev_info.max_rx_pktlen);
+
     struct rte_eth_conf port_conf = {0};
 
     if (rte_eth_dev_configure(port_id, 1, 1, &port_conf) < 0)
