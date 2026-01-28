@@ -125,6 +125,9 @@ int main(int argc, char **argv)
         rte_graph_walk(graph);
     }
 
+    
+    rte_graph_dump(stdout, graph_id);
+
     rte_graph_destroy(graph_id);
     return 0;
 }
