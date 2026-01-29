@@ -29,7 +29,7 @@ struct help {
 int helper(void *h) {
   struct help *help_struct = (struct help *)h;
   printf("Helper function called\n");
-    printf("Lcore id is %u\n", rte_lcore_id());
+  printf("Lcore id is %u\n", rte_lcore_id());
 
   rte_node_enqueue(help_struct->graph, help_struct->node, 1, help_struct->objs,
                    help_struct->nb_objs);
@@ -125,6 +125,7 @@ static void signal_handler(int sig) {
 }
 
 int main(int argc, char **argv) {
+
   rte_graph_t graph_id;
   struct rte_graph *graph;
 
@@ -135,6 +136,7 @@ int main(int argc, char **argv) {
     rte_exit(EXIT_FAILURE, "EAL init failed\n");
 
   // Remove EAL args from argc/argv
+  printf("Printing lcore id in main %u\n", rte_lcore_id());
 
   argc -= ret;
   argv += ret;
