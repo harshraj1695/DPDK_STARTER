@@ -5,20 +5,20 @@
 
 #define EVENT_DEV_ID 0
 #define NUM_QUEUES 1
-#define NUM_PORTS 2
+#define NUM_PORTS 3   // NEW: producer + 2 consumers
 
 int main(int argc, char **argv)
 {
     int ret;
 
-    /* Step 1: Init EAL */
+    // Step 1: Init EAL
     ret = rte_eal_init(argc, argv);
     if (ret < 0)
         rte_exit(EXIT_FAILURE, "EAL init failed\n");
 
     printf("EAL initialized\n");
 
-    /* Step 2: Configure Event Device */
+    // Step 2: Configure Event Device
     struct rte_event_dev_config dev_conf = {0};
     dev_conf.nb_event_queues = NUM_QUEUES;
     dev_conf.nb_event_ports  = NUM_PORTS;
@@ -32,7 +32,7 @@ int main(int argc, char **argv)
 
     printf("Event device configured\n");
 
-    /* Step 3: Setup Queue */
+    // Step 3: Setup Queue
     struct rte_event_queue_conf qconf = {0};
     qconf.schedule_type = RTE_SCHED_TYPE_ATOMIC;
     qconf.nb_atomic_flows = 1024;
@@ -44,68 +44,81 @@ int main(int argc, char **argv)
 
     printf("Queue created\n");
 
-    /* Step 4: Setup Ports */
-
+    // Step 4: Setup Ports
     struct rte_event_port_conf pconf;
 
-    /* Producer port (port 0) */
+    // Producer port (0)
     rte_event_port_default_conf_get(EVENT_DEV_ID, 0, &pconf);
     pconf.event_port_cfg = RTE_EVENT_PORT_CFG_HINT_PRODUCER;
     if (rte_event_port_setup(EVENT_DEV_ID, 0, &pconf) < 0)
         rte_exit(EXIT_FAILURE, "Producer port failed\n");
 
-    /* Consumer port (port 1) */
+    // Consumer port 1
     rte_event_port_default_conf_get(EVENT_DEV_ID, 1, &pconf);
     pconf.event_port_cfg = RTE_EVENT_PORT_CFG_HINT_CONSUMER;
     if (rte_event_port_setup(EVENT_DEV_ID, 1, &pconf) < 0)
-        rte_exit(EXIT_FAILURE, "Consumer port failed\n");
+        rte_exit(EXIT_FAILURE, "Consumer port 1 failed\n");
+
+    // Consumer port 2 (NEW)
+    rte_event_port_default_conf_get(EVENT_DEV_ID, 2, &pconf);
+    pconf.event_port_cfg = RTE_EVENT_PORT_CFG_HINT_CONSUMER;
+    if (rte_event_port_setup(EVENT_DEV_ID, 2, &pconf) < 0)
+        rte_exit(EXIT_FAILURE, "Consumer port 2 failed\n");
 
     printf("Ports created\n");
 
-    /* Link consumer port to queue */
+    // Link consumer ports to queue
     uint8_t queues[] = {0};
     uint8_t priorities[] = {RTE_EVENT_DEV_PRIORITY_NORMAL};
-    rte_event_port_link(EVENT_DEV_ID, 1, queues, priorities, 1);
 
-    /* Step 5: Start device */
+    rte_event_port_link(EVENT_DEV_ID, 1, queues, priorities, 1);
+    rte_event_port_link(EVENT_DEV_ID, 2, queues, priorities, 1);
+
+    // Step 5: Start device
     if (rte_event_dev_start(EVENT_DEV_ID) < 0)
         rte_exit(EXIT_FAILURE, "Start failed\n");
 
     printf("Event device started\n");
 
-    /* Step 6: Create event */
-    struct rte_event ev = {0};
-    ev.queue_id = 0;
-    ev.op = RTE_EVENT_OP_NEW;
-    ev.sched_type = RTE_SCHED_TYPE_ATOMIC;
-    ev.event_type = RTE_EVENT_TYPE_CPU;
-    ev.flow_id = 1;
-    ev.u64 = 12345;
+    // Step 6: Enqueue multiple events
+    printf("Enqueue events...\n");
 
-    printf("Enqueue event...\n");
+    for (uint64_t i = 0; i < 10; i++) {
+        struct rte_event ev = {0};
+        ev.queue_id   = 0;
+        ev.op         = RTE_EVENT_OP_NEW;
+        ev.sched_type = RTE_SCHED_TYPE_ATOMIC;
+        ev.event_type = RTE_EVENT_TYPE_CPU;
+        ev.flow_id    = i % 2;   // SAME flow_ids will serialize
+        ev.u64        = i;
 
-    while (rte_event_enqueue_burst(EVENT_DEV_ID, 0, &ev, 1) != 1)
-        rte_pause();
+        while (rte_event_enqueue_burst(EVENT_DEV_ID, 0, &ev, 1) != 1)
+            rte_pause();
+    }
 
-    /* Step 7: Dequeue */
+    // Step 7: Dequeue from both consumers
     struct rte_event out;
 
-    printf("Waiting for event...\n");
+    printf("Dequeue events...\n");
 
-    while (1) {
+    for (int received = 0; received < 10; ) {
         if (rte_event_dequeue_burst(EVENT_DEV_ID, 1, &out, 1, 0)) {
-            printf("Received event! data=%lu\n", out.u64);
-            break;
+            printf("Consumer 1 got event %lu flow %u\n",
+                   out.u64, out.flow_id);
+            received++;
+        }
+
+        if (rte_event_dequeue_burst(EVENT_DEV_ID, 2, &out, 1, 0)) {
+            printf("Consumer 2 got event %lu flow %u\n",
+                   out.u64, out.flow_id);
+            received++;
         }
     }
 
-    /* Cleanup */
+    // Cleanup
     rte_event_dev_stop(EVENT_DEV_ID);
     rte_event_dev_close(EVENT_DEV_ID);
 
     printf("Done.\n");
     return 0;
 }
-
-
-
