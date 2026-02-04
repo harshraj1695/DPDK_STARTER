@@ -1,8 +1,11 @@
-Perfect! Let’s organize everything so that **each time you boot your VM**, you can get your **DPDK NIC working and able to run your program** without losing SSH. I’ll list the commands in the **correct order** with explanations.
+/ for binding the nic 
+sudo ./usertools/dpdk-devbind.py -b vfio-pci --noiommu 0000:07:00.0
 
----
+ sudo ./usertools/dpdk-devbind.py --status
 
-## **1️⃣ Load VFIO modules**
+
+
+ Load VFIO modules**
 
 ```bash
 sudo modprobe vfio-pci
@@ -85,18 +88,4 @@ sudo ./dpdk/build/dpdk-pdump -l 0-1 -n 1 -- --pdump "port=0,queue=0,rx-dev=/tmp/
 
 ---
 
-### ✅ **Summary of “boot sequence”**
-
-1. `modprobe vfio-pci vfio_iommu_type1`
-2. Bind NIC to VFIO: `dpdk-devbind.py -b vfio-pci <PCI_ID>`
-3. Mount hugepages and set nr_hugepages
-4. Run DPDK program
-
-After this, your **VFIO NIC is ready for DPDK**, your **SSH NIC is safe**, and you can send/receive packets reliably.
-
----
-
-If you want, I can make a **ready-to-copy “startup script”** that does all of this automatically on VM boot. That way, you don’t have to type commands manually each time.
-
-Do you want me to do that?
 
