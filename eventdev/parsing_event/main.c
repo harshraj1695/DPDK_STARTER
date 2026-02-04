@@ -26,10 +26,7 @@
 
 static struct rte_mempool *mbuf_pool;
 
-/* ============================================================
- * RX adapter configuration callback
- * (matches YOUR DPDK header exactly)
- * ============================================================ */
+//  * RX adapter configuration callback (matches YOUR DPDK header exactly)
 static int
 rx_adapter_conf_cb(uint8_t dev_id,
                    uint8_t adapter_id,
@@ -47,9 +44,8 @@ rx_adapter_conf_cb(uint8_t dev_id,
     return 0;
 }
 
-/* ============================================================
- * Worker
- * ============================================================ */
+
+ // Worker
 static int
 event_worker(void *arg)
 {
@@ -86,9 +82,7 @@ event_worker(void *arg)
     return 0;
 }
 
-/* ============================================================
- * Main
- * ============================================================ */
+// Main
 int
 main(int argc, char **argv)
 {
@@ -102,8 +96,7 @@ main(int argc, char **argv)
     printf("Ethdev ports available: %u\n",
            rte_eth_dev_count_avail());
 
-    /* ---------- Mempool ---------- */
-
+    //  Mempool 
     mbuf_pool = rte_pktmbuf_pool_create(
         "MBUF_POOL",
         NB_MBUFS,
@@ -115,7 +108,7 @@ main(int argc, char **argv)
     if (!mbuf_pool)
         rte_exit(EXIT_FAILURE, "mbuf pool create failed\n");
 
-    /* ---------- Ethdev (net_null) ---------- */
+    // Ethdev (net_null) 
 
     struct rte_eth_conf eth_conf = {0};
 
@@ -134,8 +127,7 @@ main(int argc, char **argv)
     rte_eth_dev_start(eth_port_id);
     rte_eth_promiscuous_enable(eth_port_id);
 
-    /* ---------- Event device ---------- */
-
+    // Event device 
     struct rte_event_dev_config dev_conf = {
         .nb_event_queues = NB_QUEUES,
         .nb_event_ports  = NB_PORTS,
@@ -171,7 +163,7 @@ main(int argc, char **argv)
 
     rte_event_dev_start(EVENT_DEV_ID);
 
-    /* ---------- RX adapter (external port model) ---------- */
+    // RX adapter (external port model)
 
     uint8_t rx_adapter_id = 0;
     uint8_t rx_event_port_id = 1;
@@ -203,8 +195,7 @@ main(int argc, char **argv)
 
     printf("RX adapter started, waiting for packets...\n");
 
-    /* ---------- TX adapter ---------- */
-
+    //  TX adapter 
     uint8_t tx_adapter_id = 0;
 
     rte_event_eth_tx_adapter_create(
@@ -219,7 +210,8 @@ main(int argc, char **argv)
 
     rte_event_eth_tx_adapter_start(tx_adapter_id);
 
-    /* ---------- Launch worker ---------- */
+
+// Launch worker -
 
     unsigned int lcore_id;
     RTE_LCORE_FOREACH_WORKER(lcore_id) {
