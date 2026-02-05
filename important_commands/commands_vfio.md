@@ -1,7 +1,8 @@
-/ for binding the nic 
+for binding the nic
+  ```bash
 sudo ./usertools/dpdk-devbind.py -b vfio-pci --noiommu 0000:07:00.0
-
- sudo ./usertools/dpdk-devbind.py --status
+sudo ./usertools/dpdk-devbind.py --status
+```
 
 
 
