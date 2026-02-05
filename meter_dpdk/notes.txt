@@ -1,0 +1,1284 @@
+1. What is this API actually for? (Big Picture)
+
+The Traffic Metering and Policing (MTR) API in DPDK is used to control traffic rates and enforce QoS policies on packets received by a NIC.
+
+In simple words:
+
+It decides how fast traffic is allowed, marks packets by priority (color), and may drop or recolor packets if traffic exceeds limits.
+
+This is similar to what routers/firewalls do when they enforce:
+
+Bandwidth limits
+
+Rate shaping
+
+QoS guarantees
+
+2. Why “generic” API?
+
+“This API is agnostic of the underlying HW, SW or mixed HW-SW implementation.”
+
+This means:
+
+The same API works whether:
+
+Metering is done fully in hardware (SmartNIC)
+
+Fully in software (CPU)
+
+Or a mix of both
+
+Your application code does not change
+
+DPDK abstracts the implementation.
+
+3. Where does this sit in packet processing?
+
+“The metering and policing stage typically sits on top of flow classification”
+
+Packet processing order (simplified):
+NIC RX
+ └── Flow classification (rte_flow)
+       └── Metering & Policing (MTR)
+             └── Forward / Drop / Recolor
+
+
+👉 Important:
+Meters are not standalone. They are attached to flows using a special flow action called meter.
+
+4. What is an MTR object?
+
+An MTR object is a stateful traffic meter that:
+
+Tracks traffic history
+
+Applies rate algorithms
+
+Assigns colors to packets
+
+Applies policing rules
+
+Maintains statistics
+
+Key properties:
+
+Lives in rte_mtr namespace
+
+Can be:
+
+Private → used by one flow
+
+Shared → used by multiple flows
+
+⚠️ You cannot delete an MTR object while any flow is using it.
+
+5. Metering algorithms (VERY IMPORTANT)
+
+These algorithms decide packet color based on traffic rate.
+
+Color meaning
+Color	Meaning
+Green	Within guaranteed rate
+Yellow	Exceeds guaranteed but within peak
+Red	Exceeds all limits
+(A) RFC 2697 – srTCM (Single Rate Three Color Marker)
+
+One rate (Committed Information Rate)
+
+Two buckets:
+
+Committed bucket
+
+Excess bucket
+
+Used when traffic profile is simple
+
+👉 Common in basic QoS enforcement
+
+(B) RFC 2698 / RFC 4115 – trTCM (Two Rate Three Color Marker)
+
+Two rates:
+
+CIR (guaranteed)
+
+PIR (maximum)
+
+More precise control
+
+Used in carrier-grade networking
+
+👉 More flexible and realistic traffic control
+
+6. Color-aware vs Color-blind mode
+
+“The traffic metering algorithm can work in color aware or color blind mode”
+
+Color-blind
+
+All packets are treated as green initially
+
+Meter decides color purely based on rate
+
+Color-aware
+
+Packet already has a color
+
+Meter considers previous coloring
+
+Useful in multi-stage QoS pipelines
+
+7. Policing: What happens after coloring?
+
+“There is a separate policer action configured for each meter output color”
+
+For each color, you define what to do next.
+
+Policer actions:
+Action	Meaning
+Drop	Packet is discarded
+Keep color	No change
+Recolor	Change packet priority
+
+Example policy:
+
+Green → forward
+
+Yellow → forward but lower priority
+
+Red → drop
+
+👉 This is actual enforcement, not just marking.
+
+8. Where is packet color stored?
+
+“The policer output color is set in packet meta-data”
+
+DPDK stores the color in:
+
+struct rte_mbuf::sched::color
+
+
+This means:
+
+Later stages (scheduler, shaper, TX queues) can read it
+
+Enables end-to-end QoS pipelines
+
+9. Statistics: Why they matter
+
+“Statistics counters are maintained for MTR object”
+
+Each MTR object can track:
+
+Packets passed per color
+
+Packets dropped per color
+
+Bytes passed/dropped
+
+Why this is important:
+
+Debug QoS rules
+
+SLA enforcement
+
+Traffic accounting
+
+Detect abuse or congestion
+
+⚠️ Supported stats depend on NIC/driver capability.
+
+10. Runtime processing (Packet-by-packet flow)
+
+For each incoming packet that hits a meter:
+
+Step-by-step:
+
+1️⃣ Metering
+
+Check traffic history
+
+Apply srTCM / trTCM
+
+Assign color (G/Y/R)
+
+2️⃣ Policing
+
+Look at color
+
+Apply rule:
+
+Drop?
+
+Keep?
+
+Recolor?
+
+3️⃣ Metadata update
+
+Store final color in mbuf
+
+4️⃣ Statistics
+
+Update counters
+
+11. Why this API is powerful (Key takeaway)
+
+This API allows you to build:
+
+ISP-style traffic shaping
+
+Per-flow bandwidth enforcement
+
+Multi-tenant QoS
+
+Carrier-grade packet policing
+
+👉 All at line rate, inside DPDK RX path
+
+One-line summary
+
+MTR API = rate control + packet coloring + enforcement + statistics, applied per flow inside DPDK RX pipeline.
+
+If you want, next I can:
+
+Explain srTCM vs trTCM with bucket diagrams
+
+Show sample DPDK code using rte_mtr
+
+Explain how this works in hardware NICs
+
+Compare MTR vs scheduler vs shaper
+
+Just tell me 👍
+
+* Explain **srTCM vs trTCM with bucket diagrams** * Show **sample DPDK code using rte\_mtr**
+
+yes
+
+Great 👍
+Let’s go deep but clean, exactly in the two things you asked:
+
+1️⃣ srTCM vs trTCM — with bucket diagrams & intuition
+2️⃣ Sample DPDK code using rte_mtr — end-to-end flow
+
+I’ll keep it networking-realistic, not textbook fluff.
+
+1️⃣ srTCM vs trTCM (Token Bucket View – the heart of metering)
+
+Both srTCM and trTCM are token bucket–based algorithms.
+Tokens represent permission to send bytes.
+
+🔹 srTCM – Single Rate Three Color Marker (RFC 2697)
+Idea in one line
+
+“You have one rate, but two tolerance levels.”
+
+Buckets used
+
+C bucket (Committed bucket)
+
+E bucket (Excess bucket)
+
+Both are filled at the same rate (CIR).
+
+Parameters
+Parameter	Meaning
+CIR	Committed Information Rate
+CBS	Committed Burst Size
+EBS	Excess Burst Size
+Packet processing logic (VERY IMPORTANT)
+
+For a packet of size pkt_len:
+
+IF C_bucket has ≥ pkt_len tokens
+    → GREEN
+    → deduct from C_bucket
+ELSE IF E_bucket has ≥ pkt_len tokens
+    → YELLOW
+    → deduct from E_bucket
+ELSE
+    → RED
+
+Key characteristics
+
+✔ Simple
+✔ Low overhead
+❌ No peak-rate control
+❌ Less accurate for bursty traffic
+
+Where srTCM is used
+
+Simple per-flow policing
+
+Enterprise QoS
+
+When you only care about guaranteed rate + tolerance
+
+🔹 trTCM – Two Rate Three Color Marker (RFC 2698 / RFC 4115)
+Idea in one line
+
+“You have a guaranteed rate AND a hard peak limit.”
+
+Buckets used
+
+C bucket (Committed)
+
+P bucket (Peak)
+
+Each bucket has its own rate.
+
+Parameters
+Parameter	Meaning
+CIR	Guaranteed rate
+PIR	Peak rate
+CBS	Committed burst
+PBS	Peak burst
+Packet processing logic
+IF P_bucket < pkt_len
+    → RED
+ELSE IF C_bucket < pkt_len
+    → YELLOW
+    → deduct from P_bucket
+ELSE
+    → GREEN
+    → deduct from BOTH buckets
+
+
+⚠️ Peak bucket is checked first → strict rate enforcement.
+
+Key characteristics
+
+✔ Precise control
+✔ Carrier-grade policing
+✔ Prevents microbursts
+❌ Slightly more complex
+
+Where trTCM is used
+
+ISPs
+
+Data centers
+
+Multi-tenant environments
+
+SLAs
+
+🔥 srTCM vs trTCM (Quick Comparison)
+Feature	srTCM	trTCM
+Number of rates	1	2
+Peak rate enforcement	❌	✅
+Burst handling	Limited	Excellent
+Complexity	Low	Medium
+Typical use	Simple QoS	Carrier-grade QoS
+2️⃣ Sample DPDK Code using rte_mtr
+
+Now let’s see how this theory becomes real packets.
+
+We’ll create:
+
+One trTCM meter
+
+Attach it to a flow
+
+Define policer actions
+
+🔹 Step 1: Define meter profile (trTCM)
+#include <rte_mtr.h>
+
+struct rte_mtr_meter_profile profile;
+
+memset(&profile, 0, sizeof(profile));
+
+profile.alg = RTE_MTR_TRTCM_RFC2698;
+
+profile.trtcm_rfc2698.cir = 10 * 1000 * 1000; // 10 Mbps
+profile.trtcm_rfc2698.pir = 20 * 1000 * 1000; // 20 Mbps
+profile.trtcm_rfc2698.cbs = 64 * 1024;        // 64 KB
+profile.trtcm_rfc2698.pbs = 128 * 1024;       // 128 KB
+
+
+👉 This defines rate logic only, not actions.
+
+🔹 Step 2: Configure policer actions (per color)
+struct rte_mtr_policer_action action;
+
+memset(&action, 0, sizeof(action));
+
+action.green = RTE_MTR_POLICER_ACTION_COLOR_GREEN;
+action.yellow = RTE_MTR_POLICER_ACTION_COLOR_YELLOW;
+action.red = RTE_MTR_POLICER_ACTION_DROP;
+
+
+Policy:
+
+Green → pass
+
+Yellow → pass (lower priority later)
+
+Red → drop immediately
+
+🔹 Step 3: Enable statistics
+struct rte_mtr_stats_cfg stats_cfg;
+
+memset(&stats_cfg, 0, sizeof(stats_cfg));
+
+stats_cfg.n_packets = 1;
+stats_cfg.n_bytes = 1;
+
+🔹 Step 4: Create the MTR object
+uint32_t mtr_id = 1;
+struct rte_mtr_error error;
+
+int ret = rte_mtr_create(
+    port_id,
+    mtr_id,
+    &profile,
+    &action,
+    &stats_cfg,
+    RTE_MTR_CREATE_SHARED,
+    &error
+);
+
+if (ret < 0) {
+    printf("MTR create failed: %s\n", error.message);
+}
+
+
+✔ This meter can now be shared across flows
+
+🔹 Step 5: Attach meter to a flow (critical step)
+
+Inside rte_flow rule:
+
+struct rte_flow_action actions[2];
+
+actions[0].type = RTE_FLOW_ACTION_TYPE_METER;
+actions[0].conf = &mtr_id;
+
+actions[1].type = RTE_FLOW_ACTION_TYPE_END;
+
+
+👉 Without this, the meter does NOTHING.
+
+3️⃣ What happens to a real packet now?
+
+For every RX packet matching this flow:
+
+Packet arrives
+ → Meter checks buckets
+ → Color assigned (G/Y/R)
+ → Policer applied
+ → Color stored in mbuf
+ → Stats updated
+
+
+This happens inside NIC RX path, before your app sees the packet.
+
+4️⃣ How this fits your DPDK learning path
+
+Given your work with:
+
+RX queues
+
+AF_PACKET
+
+vhost / virtio
+
+mbuf metadata
+
+👉 MTR is the missing QoS layer that ties everything together.
+
+Later you can combine:
+
+MTR (rate control)
+
+Scheduler (priority)
+
+TX queues (hardware offload)
+
+🧠 Final mental model (remember this)
+
+srTCM = “How much can I burst?”
+trTCM = “How fast can I go, ever?”
+
+If you want, next I can:
+
+Show how NIC hardware offloads MTR
+
+Explain color propagation to schedulers
+
+Build a full QoS pipeline (Flow → Meter → Scheduler → TX)
+
+Debug why packets turn red unexpectedly
+
+Just say the word 🔥
+
+explain this metering concept in dpdk in flow like first what we do and then what we do 
+
+Perfect question 👍
+Let’s explain DPDK metering in flow in a strict step-by-step sequence, exactly what you do first, then next, then runtime, so you can visualize it like a pipeline.
+
+I’ll avoid API noise and focus on concept + order.
+
+Big Picture (1-line)
+
+Metering in DPDK is NOT a function call on packets — it is a rule you attach to a flow, and the NIC/driver enforces it automatically.
+
+Packet Life Before Metering (Context)
+
+Before metering even exists, DPDK RX pipeline looks like this:
+
+NIC → RX queue → rte_eth_rx_burst() → Application
+
+
+When flow + meter is added:
+
+NIC
+ └── Flow match
+       └── Meter (rate + color)
+             └── Policer (drop / recolor)
+                   └── RX queue → Application
+
+STEP-BY-STEP: HOW METERING IS DONE IN DPDK FLOW
+🟢 STEP 1: Decide what traffic you want to control
+
+First thing YOU decide (conceptually):
+
+“Which packets should be rate-limited?”
+
+Examples:
+
+All traffic from a VM
+
+Traffic from a specific IP
+
+Traffic from a port / VLAN
+
+Traffic from a TCP flow
+
+👉 This becomes your flow classification rule.
+
+🟢 STEP 2: Create a FLOW rule (but don’t meter yet)
+
+You define a flow match using rte_flow.
+
+Example conceptually:
+
+Match:
+  src IP = 10.0.0.5
+  dst port = 80
+
+
+At this stage:
+
+Packets are only matched
+
+No rate enforcement yet
+
+🟢 STEP 3: Define the METER logic (rate rules)
+
+Now you define HOW FAST traffic is allowed.
+
+This is done by creating an MTR object.
+
+Conceptually you say:
+
+“For this traffic:
+
+Guaranteed: 10 Mbps
+
+Maximum: 20 Mbps
+
+Bursts allowed”
+
+This step defines:
+
+srTCM or trTCM
+
+CIR / PIR
+
+Burst sizes
+
+⚠️ Still no packets are affected yet.
+
+🟢 STEP 4: Define POLICER behavior (what to do when limits exceed)
+
+Now you define:
+
+“If traffic exceeds limits, what should happen?”
+
+Per color rules:
+
+Color	Meaning	Action
+Green	Within limits	Allow
+Yellow	Over CIR	Allow / downgrade
+Red	Over PIR	Drop
+
+This step decides packet fate.
+
+🟢 STEP 5: Enable STATISTICS (optional but important)
+
+You decide:
+
+“Do I want to count packets/bytes per color?”
+
+This is for:
+
+Debugging
+
+SLA monitoring
+
+Congestion detection
+
+🟢 STEP 6: CREATE the MTR object
+
+Now DPDK actually creates a stateful meter:
+
+MTR object:
+  - Token buckets
+  - History
+  - Counters
+
+
+Still:
+❌ No packet touched
+✔ Meter exists in NIC/driver
+
+🟢 STEP 7: ATTACH the meter to a FLOW (MOST IMPORTANT STEP)
+
+This is where everything becomes active.
+
+You attach the meter using flow action:
+
+Action:
+  METER → mtr_id
+
+
+Now the pipeline becomes:
+
+Packet arrives
+ → Flow match
+ → Meter applied
+
+
+⚠️ Without this step, meter is dead code.
+
+🟢 STEP 8: RX processing at runtime (AUTOMATIC)
+
+Now for every packet that matches the flow:
+
+8.1 Metering (rate check)
+
+Token buckets updated
+
+Packet colored:
+
+Green
+
+Yellow
+
+Red
+
+8.2 Policing (enforcement)
+
+Based on color:
+
+Drop?
+
+Keep?
+
+Recolor?
+
+8.3 Metadata update
+
+Final color stored in rte_mbuf
+
+Application can see it later
+
+8.4 Statistics update
+
+Packet & byte counters updated
+
+🔥 This all happens before rte_eth_rx_burst().
+
+🟢 STEP 9: Packet reaches your application (or not)
+
+Now:
+
+Green/Yellow packet → appears in RX burst
+
+Red packet → never reaches app (dropped)
+
+Your app:
+
+Does NOT call meter functions
+
+Just receives already-policed packets
+
+🟢 STEP 10: Runtime control (dynamic updates)
+
+Later, while traffic is flowing, you can:
+
+Update meter rates
+
+Reset statistics
+
+Disable / enable meter
+
+Destroy meter (only if unused)
+
+ONE FULL FLOW IN HUMAN LANGUAGE
+
+I decide what traffic I care about
+
+I define a flow to catch that traffic
+
+I define how fast it’s allowed
+
+I define what happens when it exceeds
+
+I attach the meter to the flow
+
+NIC enforces it automatically per packet
+
+WHY DPDK DOES IT THIS WAY (VERY IMPORTANT)
+
+DPDK avoids per-packet API calls because:
+
+Function calls per packet = slow ❌
+
+Flow rules = hardware offload ✔
+
+Stateful meters live in NIC ✔
+
+This is carrier-grade design.
+
+COMMON BEGINNER MISTAKES (watch out)
+
+❌ Creating meter but not attaching to flow
+❌ Expecting app to call meter APIs per packet
+❌ Forgetting policer rules (default may drop)
+❌ Assuming all NICs support hardware metering
+
+FINAL MENTAL DIAGRAM (remember this)
+FLOW (match)
+   ↓
+METER (rate → color)
+   ↓
+POLICER (drop / recolor)
+   ↓
+RX queue
+   ↓
+Application
+
+
+If you want next, I can:
+
+Draw flow + meter + scheduler pipeline
+
+Explain why packet becomes RED suddenly
+
+Show how to debug meter stats
+
+Explain hardware vs software metering
+
+Just tell me 💡
+
+what the term in btw you defined like cir pir srtcm and trtcm
+
+Good, this is the right moment to lock the terminology 🔒
+I’ll explain each term slowly, in plain language, and how they relate to each other, not just definitions.
+
+Core Metering Terms in DPDK (QoS Language)
+
+These terms come from traffic policing theory, used in routers, switches, and NICs.
+
+1️⃣ CIR – Committed Information Rate
+What it means
+
+The guaranteed traffic rate that is always allowed.
+
+Think of CIR as:
+
+Your minimum assured bandwidth
+
+Traffic up to this rate is always OK
+
+Example
+CIR = 10 Mbps
+
+
+If traffic is:
+
+5 Mbps → always allowed ✅
+
+10 Mbps → always allowed ✅
+
+In packet terms
+
+Packets sent within CIR are marked:
+
+🟢 GREEN
+
+Real-life analogy
+
+CIR = speed limit you are guaranteed on a highway lane
+
+2️⃣ PIR – Peak Information Rate
+What it means
+
+Absolute maximum traffic rate — never allowed to exceed.
+
+Even for short bursts, traffic above PIR is not allowed.
+
+Example
+PIR = 20 Mbps
+
+
+If traffic hits:
+
+15 Mbps → maybe allowed (yellow)
+
+25 Mbps → not allowed ❌
+
+In packet terms
+
+Packets exceeding PIR are marked:
+
+🔴 RED (usually dropped)
+
+Real-life analogy
+
+PIR = maximum engine speed — you can’t cross it
+
+3️⃣ CBS – Committed Burst Size
+What it means
+
+How much traffic you can send at once at CIR without penalty
+
+Networks send traffic in bursts, not perfectly smooth.
+
+CBS allows short spikes.
+
+Example
+CBS = 64 KB
+
+
+You can send:
+
+64 KB instantly at full speed
+
+Then traffic must slow down
+
+Analogy
+
+CBS = size of a water tank filled at CIR
+
+4️⃣ PBS / EBS – Burst Sizes
+
+Depending on algorithm:
+
+Term	Used in	Meaning
+EBS	srTCM	Extra burst beyond CIR
+PBS	trTCM	Peak burst beyond PIR
+Important
+
+Larger burst → more tolerance
+
+Smaller burst → stricter policing
+
+5️⃣ srTCM – Single Rate Three Color Marker
+What the name literally means
+
+Single Rate → only CIR
+
+Three Color → Green / Yellow / Red
+
+Marker → marks packets, doesn’t decide fate
+
+What srTCM does
+
+Uses:
+
+1 rate (CIR)
+
+2 buckets (CBS & EBS)
+
+Traffic behavior:
+
+Traffic level	Color
+≤ CIR	Green
+> CIR (small burst)	Yellow
+Too much	Red
+When to use srTCM
+
+✔ Simple rate control
+✔ No strict peak limit
+❌ Cannot cap max bandwidth
+
+6️⃣ trTCM – Two Rate Three Color Marker
+What the name literally means
+
+Two Rate → CIR & PIR
+
+Three Color → Green / Yellow / Red
+
+Marker → marks packets
+
+What trTCM does
+
+Uses:
+
+CIR + CBS
+
+PIR + PBS
+
+Traffic behavior:
+
+Traffic level	Color
+≤ CIR	Green
+> CIR but ≤ PIR	Yellow
+> PIR	Red
+Why trTCM is powerful
+
+✔ Guaranteed bandwidth
+✔ Strict maximum bandwidth
+✔ Real ISP-style policing
+
+7️⃣ Color-aware vs Color-blind (important term)
+Color-blind
+
+Meter assumes all packets are GREEN
+
+Ignores existing color
+
+Color-aware
+
+Meter respects incoming packet color
+
+Used in multi-stage QoS pipelines
+
+8️⃣ Policer (not same as meter!)
+Meter
+
+Measures & marks packets
+
+Policer
+
+Enforces rules (drop / recolor)
+
+Policer actions
+Action	Meaning
+Drop	Packet destroyed
+Recolor	Change priority
+Pass	No change
+9️⃣ Three Colors (Final Meaning)
+Color	Meaning	Typical Action
+Green	Guaranteed traffic	Always pass
+Yellow	Excess traffic	Pass / downgrade
+Red	Violation	Drop
+10️⃣ How these terms connect (important mental map)
+CIR, PIR, CBS, PBS
+        ↓
+     srTCM / trTCM
+        ↓
+   Packet Color (G/Y/R)
+        ↓
+      Policer
+        ↓
+   Drop / Pass / Recolor
+
+FINAL ONE-PARAGRAPH SUMMARY
+
+CIR is your guaranteed bandwidth, PIR is your absolute limit.
+srTCM uses only CIR and allows bursts, while trTCM uses both CIR and PIR for strict control.
+Packets are marked green, yellow, or red, and the policer decides their fate based on that color.
+
+If you want next, I can:
+
+Explain why a packet becomes yellow
+
+Show numerical example packet-by-packet
+
+Explain how NIC hardware enforces these rates
+
+Compare meter vs scheduler vs shaper
+
+Just tell me 👍
+
+give me the complete code for it like how to set and and also explain in comments define the fields & flags 
+
+Below is a COMPLETE, MINIMAL but REALISTIC DPDK example showing how to configure Traffic Metering (trTCM) and attach it to a flow, with heavy inline comments explaining every field, flag, and concept.
+
+This is exactly how you do it in practice, not pseudo-code.
+
+🧠 What this example does (before code)
+
+We will:
+
+Initialize DPDK port
+
+Create a trTCM meter
+
+Configure policer actions per color
+
+Enable statistics
+
+Create an rte_flow rule
+
+Attach the meter to the flow
+
+RX packets → automatically metered
+
+📦 Assumptions
+
+One port (port_id = 0)
+
+Meter applies to all IPv4 packets
+
+Red packets are dropped
+
+Green/Yellow packets are allowed
+
+📌 Header Files
+#include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+
+#include <rte_eal.h>
+#include <rte_ethdev.h>
+#include <rte_flow.h>
+#include <rte_mtr.h>
+
+1️⃣ Define Meter Profile (trTCM)
+/* 
+ * Meter profile defines HOW traffic is measured.
+ * This example uses trTCM (Two Rate Three Color Marker).
+ */
+struct rte_mtr_meter_profile meter_profile;
+
+/* Always clear structs */
+memset(&meter_profile, 0, sizeof(meter_profile));
+
+/*
+ * Algorithm selection:
+ * RTE_MTR_TRTCM_RFC2698 = Two-rate, three-color marker
+ */
+meter_profile.alg = RTE_MTR_TRTCM_RFC2698;
+
+/*
+ * CIR: Committed Information Rate (bytes per second)
+ * Guaranteed bandwidth
+ */
+meter_profile.trtcm_rfc2698.cir = 10 * 1000 * 1000; // 10 Mbps
+
+/*
+ * PIR: Peak Information Rate (bytes per second)
+ * Absolute maximum bandwidth
+ */
+meter_profile.trtcm_rfc2698.pir = 20 * 1000 * 1000; // 20 Mbps
+
+/*
+ * CBS: Committed Burst Size (bytes)
+ * How much data can burst at CIR
+ */
+meter_profile.trtcm_rfc2698.cbs = 64 * 1024; // 64 KB
+
+/*
+ * PBS: Peak Burst Size (bytes)
+ * How much data can burst at PIR
+ */
+meter_profile.trtcm_rfc2698.pbs = 128 * 1024; // 128 KB
+
+2️⃣ Define Policer Actions (per color)
+/*
+ * Policer defines WHAT to do after color is assigned.
+ */
+struct rte_mtr_policer_action policer_action;
+
+memset(&policer_action, 0, sizeof(policer_action));
+
+/*
+ * Green packets → keep green (no-op)
+ */
+policer_action.green = RTE_MTR_POLICER_ACTION_COLOR_GREEN;
+
+/*
+ * Yellow packets → keep yellow
+ * (Later scheduler may deprioritize)
+ */
+policer_action.yellow = RTE_MTR_POLICER_ACTION_COLOR_YELLOW;
+
+/*
+ * Red packets → DROP immediately
+ */
+policer_action.red = RTE_MTR_POLICER_ACTION_DROP;
+
+3️⃣ Enable Meter Statistics
+/*
+ * Configure which statistics counters to maintain
+ */
+struct rte_mtr_stats_cfg stats_cfg;
+
+memset(&stats_cfg, 0, sizeof(stats_cfg));
+
+/*
+ * Count packets per color
+ */
+stats_cfg.n_packets = 1;
+
+/*
+ * Count bytes per color
+ */
+stats_cfg.n_bytes = 1;
+
+4️⃣ Create the MTR Object
+uint16_t port_id = 0;
+uint32_t mtr_id = 1;
+
+struct rte_mtr_error mtr_error;
+
+/*
+ * Create the meter object
+ *
+ * RTE_MTR_CREATE_SHARED:
+ *   - Meter can be used by multiple flows
+ */
+int ret = rte_mtr_create(
+    port_id,
+    mtr_id,
+    &meter_profile,
+    &policer_action,
+    &stats_cfg,
+    RTE_MTR_CREATE_SHARED,
+    &mtr_error
+);
+
+if (ret < 0) {
+    printf("Meter creation failed: %s\n", mtr_error.message);
+    return -1;
+}
+
+5️⃣ Define Flow Match (IPv4 traffic)
+struct rte_flow_attr attr;
+struct rte_flow_item pattern[3];
+struct rte_flow_action actions[3];
+struct rte_flow_error flow_error;
+
+/*
+ * Flow attributes
+ */
+memset(&attr, 0, sizeof(attr));
+attr.ingress = 1;  // Match packets coming INTO NIC
+
+/*
+ * FLOW PATTERN
+ * ETH → IPv4 → END
+ */
+
+memset(pattern, 0, sizeof(pattern));
+
+/* Ethernet header (match any) */
+pattern[0].type = RTE_FLOW_ITEM_TYPE_ETH;
+
+/* IPv4 header (match any IPv4 packet) */
+pattern[1].type = RTE_FLOW_ITEM_TYPE_IPV4;
+
+/* End of pattern */
+pattern[2].type = RTE_FLOW_ITEM_TYPE_END;
+
+6️⃣ Attach Meter as Flow Action (CRITICAL)
+/*
+ * Flow actions:
+ * 1. METER
+ * 2. END
+ */
+memset(actions, 0, sizeof(actions));
+
+/*
+ * METER action:
+ * Links flow to previously created meter
+ */
+actions[0].type = RTE_FLOW_ACTION_TYPE_METER;
+actions[0].conf = &mtr_id;
+
+/*
+ * End of actions
+ */
+actions[1].type = RTE_FLOW_ACTION_TYPE_END;
+
+7️⃣ Create the Flow Rule
+struct rte_flow *flow = rte_flow_create(
+    port_id,
+    &attr,
+    pattern,
+    actions,
+    &flow_error
+);
+
+if (!flow) {
+    printf("Flow creation failed: %s\n", flow_error.message);
+    return -1;
+}
+
+
+🔥 At this point, metering is ACTIVE
+
+8️⃣ Runtime Behavior (What Happens Now)
+
+For every incoming IPv4 packet:
+
+Packet arrives at NIC
+ → Flow match (IPv4)
+ → Meter (trTCM)
+     → GREEN / YELLOW / RED
+ → Policer
+     → DROP or PASS
+ → RX queue
+ → rte_eth_rx_burst()
+
+
+You do NOT call meter functions per packet.
+
+9️⃣ Reading Meter Statistics (Optional)
+struct rte_mtr_stats stats;
+memset(&stats, 0, sizeof(stats));
+
+ret = rte_mtr_stats_read(
+    port_id,
+    mtr_id,
+    &stats,
+    0,   // clear = 0 → don't reset after read
+    &mtr_error
+);
+
+if (ret == 0) {
+    printf("Green packets:  %" PRIu64 "\n", stats.n_pkts[RTE_COLOR_GREEN]);
+    printf("Yellow packets: %" PRIu64 "\n", stats.n_pkts[RTE_COLOR_YELLOW]);
+    printf("Red packets:    %" PRIu64 "\n", stats.n_pkts[RTE_COLOR_RED]);
+}
+
+🚩 Important Flags & Fields (Quick Reference)
+Field	Meaning
+alg	Metering algorithm
+cir	Guaranteed rate
+pir	Max allowed rate
+cbs/pbs	Burst tolerance
+RTE_MTR_CREATE_SHARED	Meter reusable
+RTE_FLOW_ACTION_TYPE_METER	Attach meter
+attr.ingress	RX direction
+policer_action.red = DROP	Enforcement
+❗ Common Mistakes
+
+❌ Creating meter but not attaching to flow
+❌ Expecting packets to be metered in software loop
+❌ Forgetting policer rules
+❌ Using trTCM but not setting PIR
+
+🧠 Final Mental Model
+Define RATE  →  Define ACTION  →  Create METER
+        ↓
+Attach METER to FLOW
+        ↓
+NIC enforces automatically
