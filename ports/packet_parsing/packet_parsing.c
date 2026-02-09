@@ -23,9 +23,7 @@ void parse_packet(struct rte_mbuf *m) {
 
   printf("\n========== PACKET PARSING ==========\n");
 
-  /* -------------------------------------------------- */
-  /* L2: ETHERNET HEADER                                */
-  /* -------------------------------------------------- */
+  // L2 ETHERNET HEADER                         
   struct rte_ether_hdr *eth = (struct rte_ether_hdr *)pkt;
 
   printf("L2: Ethernet\n");
@@ -42,9 +40,7 @@ void parse_packet(struct rte_mbuf *m) {
   uint16_t eth_type = rte_be_to_cpu_16(eth->ether_type);
   offset = sizeof(struct rte_ether_hdr);
 
-  /* -------------------------------------------------- */
-  /* VLAN Detection                                     */
-  /* -------------------------------------------------- */
+  // VLAN Detection                        
   if (eth_type == RTE_ETHER_TYPE_VLAN) {
     struct rte_vlan_hdr *vlan =
         rte_pktmbuf_mtod_offset(m, struct rte_vlan_hdr *, offset);
@@ -55,9 +51,7 @@ void parse_packet(struct rte_mbuf *m) {
     offset += sizeof(struct rte_vlan_hdr);
   }
 
-  /* -------------------------------------------------- */
-  /* L3: IPv4                                           */
-  /* -------------------------------------------------- */
+  // L3: IPv4                           
   if (eth_type == RTE_ETHER_TYPE_IPV4) {
 
     struct rte_ipv4_hdr *ip =
@@ -77,7 +71,7 @@ void parse_packet(struct rte_mbuf *m) {
     uint16_t ihl = (ip->version_ihl & 0x0F) * 4;
     offset += ihl;
 
-    /* ---------------- UDP ---------------- */
+    //UDP 
     if (proto == IPPROTO_UDP) {
       struct rte_udp_hdr *udp =
           rte_pktmbuf_mtod_offset(m, struct rte_udp_hdr *, offset);
@@ -89,7 +83,7 @@ void parse_packet(struct rte_mbuf *m) {
       offset += sizeof(struct rte_udp_hdr);
     }
 
-    /* ---------------- TCP ---------------- */
+    //TCP 
     else if (proto == IPPROTO_TCP) {
 
       struct rte_tcp_hdr *tcp =
@@ -106,7 +100,7 @@ void parse_packet(struct rte_mbuf *m) {
       offset += tcp_hlen;
     }
 
-    /* ---------------- ICMP ---------------- */
+    //  ICMP 
     else if (proto == IPPROTO_ICMP) {
 
       struct rte_icmp_hdr *icmp =
@@ -120,9 +114,7 @@ void parse_packet(struct rte_mbuf *m) {
     }
   }
 
-  /* -------------------------------------------------- */
-  /* L3: IPv6                                           */
-  /* -------------------------------------------------- */
+  // L3: IPv6   
   else if (eth_type == RTE_ETHER_TYPE_IPV6) {
 
     struct rte_ipv6_hdr *ip6 =
