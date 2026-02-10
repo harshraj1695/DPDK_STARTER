@@ -6,15 +6,19 @@
 
 #include <rte_eal.h>
 // #include <rte_mp.h>
-
+int out=0;
 // Handler function that gets called when message is received
 static int mp_message_handler(const struct rte_mp_msg *msg, const void *peer) {
   int value;
 
   // Copy payload data from message param buffer
-  memcpy(&value, msg->param, sizeof(int));
-
-  printf("Primary received value = %d\n", value);
+  printf("Size of param: %d\n", msg->len_param);
+//   memcpy(&value, msg->param, sizeof(int));
+  for(int i=0;i<msg->len_param;i++){
+    printf("Primary received param[%d] = %d\n", i, msg->param[i]);
+  }
+    // printf("Primary received value = %d\n", value);
+  out=1;
   return 0;
 }
 
@@ -34,7 +38,7 @@ int main(int argc, char **argv) {
   }
 
   // Keep primary alive so it can receive messages
-  while (1) {
+  while (!out) {
     printf("Primary waiting for messages...\n");
 
     sleep(1);

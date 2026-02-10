@@ -22,10 +22,18 @@ static void send_message(void)
     int value = 42;
 
     // Specify payload size
-    msg.len_param = sizeof(int);
+    // msg.len_param = sizeof(int);
+        msg.len_param = sizeof(uint8_t)*4;
 
-    // Copy payload into message buffer
-    memcpy(msg.param, &value, sizeof(int));
+    // Copy payload into message buffer 
+    // memcpy(msg.param, &value, sizeof(int));
+    // here it is a issue that if we send no >255 then it will overflow uint8_t and we will
+    //  get wrong value in secondary
+    msg.param[0]=value;
+    msg.param[1]=value+1;
+    msg.param[2]=value+2;
+    msg.param[3]=value+3;
+
 
     printf("Secondary sending message...\n");
 
