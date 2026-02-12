@@ -68,6 +68,33 @@ static void build_udp_packet(struct rte_mbuf *m) {
   memcpy(data, payload, payload_len);
 }
 
+
+
+void init_port(uint16_t port_id, struct rte_mempool *mp) {
+  struct rte_eth_conf port_conf = {0};
+
+  if (rte_eth_dev_configure(port_id, 1, 1, &port_conf) < 0)
+    rte_exit(EXIT_FAILURE, "Port configure failed\n");
+
+  if (rte_eth_rx_queue_setup(port_id, 0, 1024, rte_eth_dev_socket_id(port_id),
+                             NULL, mp) < 0)
+    rte_exit(EXIT_FAILURE, "RX queue setup failed\n");
+
+  if (rte_eth_tx_queue_setup(port_id, 0, 1024, rte_eth_dev_socket_id(port_id),
+                             NULL) < 0)
+    rte_exit(EXIT_FAILURE, "TX queue setup failed\n");
+
+  if (rte_eth_dev_start(port_id) < 0)
+    rte_exit(EXIT_FAILURE, "Port start failed\n");
+
+  printf("Port %u initialized and started.\n", port_id);
+  struct rte_eth_dev_info info;
+  rte_eth_dev_info_get(0, &info);
+  printf("Driver: %s\n", info.driver_name);
+}
+
+
+
 int main(int argc, char **argv) {
   int ret = rte_eal_init(argc, argv);
   if (ret < 0)
@@ -81,32 +108,7 @@ int main(int argc, char **argv) {
   if (!mp)
     rte_exit(EXIT_FAILURE, "Cannot create mempool\n");
 
-  // Configure port 0 (AF_PACKET PMD) 
-  // uint16_t port_id = 0;
-  struct rte_eth_conf port_conf = {0};
-  port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
-
-  if (rte_eth_dev_configure(port_id, 1, 1, &port_conf) < 0)
-    rte_exit(EXIT_FAILURE, "Port configure failed\n");
-
-  struct rte_eth_rxconf rxq_conf;
-  memset(&rxq_conf, 0, sizeof(rxq_conf));
-
-  if (rte_eth_rx_queue_setup(port_id, 0, 256, 0, &rxq_conf, mp) < 0)
-    rte_exit(EXIT_FAILURE, "RX queue setup failed\n");
-
-  struct rte_eth_txconf txq_conf;
-  memset(&txq_conf, 0, sizeof(txq_conf));
-
-  if (rte_eth_tx_queue_setup(port_id, 0, 256, 0, &txq_conf) < 0)
-    rte_exit(EXIT_FAILURE, "TX queue setup failed\n");
-
-  if (rte_eth_dev_start(port_id) < 0)
-    rte_exit(EXIT_FAILURE, "Port start failed\n");
-  struct rte_eth_dev_info info;
-  rte_eth_dev_info_get(0, &info);
-  printf("Driver: %s\n", info.driver_name);
-
+  init_port(port_id, mp);
   // Allocate an mbuf 
   struct rte_mbuf *m = rte_pktmbuf_alloc(mp);
   if (!m)
@@ -118,6 +120,7 @@ int main(int argc, char **argv) {
   printf("Transmitting packet...\n");
 
   // Transmit it
+  while(1){
   uint16_t sent = rte_eth_tx_burst(port_id, 0, &m, 1);
   if (sent == 0) {
     printf("Failed to send\n");
@@ -125,6 +128,6 @@ int main(int argc, char **argv) {
   } else {
     printf("Packet sent!\n");
   }
-
+  }
   return 0;
 }
