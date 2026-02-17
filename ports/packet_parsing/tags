@@ -1,0 +1,27 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_OUTPUT_EXCMD	mixed	/number, pattern, mixed, or combineV2/
+!_TAG_OUTPUT_FILESEP	slash	/slash or backslash/
+!_TAG_OUTPUT_MODE	u-ctags	/u-ctags or e-ctags/
+!_TAG_PATTERN_LENGTH_LIMIT	96	/0 for no limit/
+!_TAG_PROC_CWD	/home/harshraj1695/dpdk/ports/packet_parsing/	//
+!_TAG_PROGRAM_AUTHOR	Universal Ctags Team	//
+!_TAG_PROGRAM_NAME	Universal Ctags	/Derived from Exuberant Ctags/
+!_TAG_PROGRAM_URL	https://ctags.io/	/official site/
+!_TAG_PROGRAM_VERSION	5.9.0	//
+APP	Makefile	/^APP = packet_parsing$/;"	m
+BURST_SIZE	rx_tx.c	/^#define BURST_SIZE /;"	d	file:
+SRCS	Makefile	/^SRCS = main.c eal_init.c mempool.c port.c rx_tx.c mk_buff_info.c packet_parsing.c$/;"	m
+all	Makefile	/^all:$/;"	t
+clean	Makefile	/^clean:$/;"	t
+create_mempool	mempool.c	/^struct rte_mempool* create_mempool()$/;"	f	typeref:struct:rte_mempool *
+init_eal	eal_init.c	/^int init_eal(int argc, char **argv)$/;"	f	typeref:typename:int
+init_port	port.c	/^void init_port(uint16_t port_id, struct rte_mempool *mp) {$/;"	f	typeref:typename:void
+l2_to_str	mk_buff_info.c	/^static const char* l2_to_str(uint8_t t)$/;"	f	typeref:typename:const char *	file:
+l3_to_str	mk_buff_info.c	/^static const char* l3_to_str(uint8_t t)$/;"	f	typeref:typename:const char *	file:
+l4_to_str	mk_buff_info.c	/^static const char* l4_to_str(uint8_t t)$/;"	f	typeref:typename:const char *	file:
+main	main.c	/^int main(int argc, char **argv)$/;"	f	typeref:typename:int
+parse_packet	packet_parsing.c	/^void parse_packet(struct rte_mbuf *m) {$/;"	f	typeref:typename:void
+print_ipv6_addr	packet_parsing.c	/^void print_ipv6_addr(uint8_t a[16]) {$/;"	f	typeref:typename:void
+print_mbuf_info	mk_buff_info.c	/^void print_mbuf_info(struct rte_mbuf *m)$/;"	f	typeref:typename:void
+run_rx_tx_loop	rx_tx.c	/^void run_rx_tx_loop(uint16_t port_id)$/;"	f	typeref:typename:void
