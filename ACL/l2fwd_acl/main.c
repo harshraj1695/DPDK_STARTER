@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <getopt.h>
+#include <stdlib.h>
 
 #include <rte_acl.h>
 #include <rte_eal.h>
@@ -21,8 +22,9 @@
 #define NB_MBUF    8192
 #define BURST      32
 
-RTE_LOG_REGISTER(l2fwd_acl_logtype, l2fwd_acl, INFO);
-#define LOGTYPE L2FWD_ACL
+/* ---- Correct DPDK logging style ---- */
+#define RTE_LOGTYPE_L2FWD_ACL RTE_LOGTYPE_USER1
+#define LOGTYPE_L2FWD_ACL RTE_LOGTYPE_L2FWD_ACL
 
 RTE_ACL_RULE_DEF(acl_rule, NUM_FIELDS);
 
@@ -102,7 +104,6 @@ init_acl(void)
     rule.field[PROTO_FIELD].value.u8 = IPPROTO_TCP;
     rule.field[PROTO_FIELD].mask_range.u8 = 0xFF;
 
-    /* convert rule IP to host order */
     rule.field[SRC_FIELD].value.u32 =
         rte_be_to_cpu_32(RTE_IPV4(172,17,166,200));
     rule.field[SRC_FIELD].mask_range.u32 = 32;
@@ -128,14 +129,13 @@ init_acl(void)
     if (rte_acl_build(ctx, &cfg) != 0)
         rte_exit(EXIT_FAILURE, "ACL build failed\n");
 
-    RTE_LOG(INFO, LOGTYPE, "ACL ready\n");
+    RTE_LOG(INFO, L2FWD_ACL, "ACL ready\n");
     return ctx;
 }
 
 /* ---------------- MAIN ---------------- */
 
-int
-main(int argc, char **argv)
+int main(int argc, char **argv)
 {
     force_quit = false;
     signal(SIGINT, signal_handler);
@@ -184,7 +184,7 @@ main(int argc, char **argv)
 
         rte_eth_promiscuous_enable(port_id);
 
-        RTE_LOG(INFO, LOGTYPE, "Started port %u\n", port_id);
+        RTE_LOG(INFO, L2FWD_ACL, "Started port %u\n", port_id);
     }
 
     struct rte_mbuf *bufs[BURST];
@@ -236,11 +236,10 @@ main(int argc, char **argv)
 
                 rte_acl_classify(acl_ctx, data, res, 1, 1);
 
-                if (res[0]) {
+                if (res[0])
                     rte_eth_tx_burst(port_id, 0, &m, 1);
-                } else {
+                else
                     rte_pktmbuf_free(m);
-                }
             }
         }
     }
